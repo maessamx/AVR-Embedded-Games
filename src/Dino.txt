@@ -1,0 +1,1363 @@
+#define F_CPU 8000000L
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+
+void sendCommand(unsigned char cmd)
+{
+    PORTD = (PORTD & 0x0F) | (cmd & 0xF0);
+
+    PORTD &= ~(1 << PD0);
+    PORTD |= (1 << PD1);
+
+    _delay_us(1);
+
+    PORTD &= ~(1 << PD1);
+
+    _delay_us(200);
+
+    PORTD = (PORTD & 0x0F) | (cmd << 4);
+
+    PORTD |= (1 << PD1);
+
+    _delay_us(1);
+
+    PORTD &= ~(1 << PD1);
+
+    _delay_ms(2);
+}
+
+void sendData(unsigned char data)
+{
+    PORTD = (PORTD & 0x0F) | (data & 0xF0);
+
+    PORTD |= (1 << PD0);
+    PORTD |= (1 << PD1);
+
+    _delay_us(1);
+
+    PORTD &= ~(1 << PD1);
+
+    _delay_us(200);
+
+    PORTD = (PORTD & 0x0F) | (data << 4);
+
+    PORTD |= (1 << PD1);
+
+    _delay_us(1);
+
+    PORTD &= ~(1 << PD1);
+
+    _delay_ms(2);
+}
+
+void printText(char *text)
+{
+    while (*text)
+    {
+        sendData(*text);
+        text++;
+    }
+}
+
+void lcdStart()
+{
+    DDRD |= 0xF3;
+
+    _delay_ms(20);
+
+    sendCommand(0x02);
+    sendCommand(0x28);
+    sendCommand(0x0C);
+    sendCommand(0x01);
+}
+
+void customChar(unsigned char pos, unsigned char shape[])
+{
+    sendCommand(0x40 + (pos * 8));
+
+    for (int i = 0; i < 8; i++)
+    {
+        sendData(shape[i]);
+    }
+
+    sendCommand(0x80);
+}
+
+unsigned char dino[8] =
+{
+    0x07,
+    0x05,
+    0x06,
+    0x07,
+    0x14,
+    0x17,
+    0x0E,
+    0x0A
+};
+
+unsigned char cactus[8] =
+{
+    0x04,
+    0x05,
+    0x15,
+    0x15,
+    0x17,
+    0x0C,
+    0x04,
+    0x04
+};
+
+unsigned char numbers[10] =
+{
+    0x3F,
+    0x06,
+    0x5B,
+    0x4F,
+    0x66,
+    0x6D,
+    0x7D,
+    0x07,
+    0x7F,
+    0x6F
+};
+
+volatile int playerRow = 1;
+volatile int started = 0;
+
+int treePos = 15;
+int points = 0;
+
+ISR(INT0_vect)
+{
+    if (started == 0)
+    {
+        started = 1;
+    }
+    else
+    {
+        if (playerRow == 1)
+        {
+            playerRow = 0;
+        }
+    }
+
+    _delay_ms(50);
+}
+
+void loseScreen()
+{
+    started = 0;
+
+    PORTB |= (1 << PB0);
+
+    sendCommand(0x01);
+
+    printText("GAME OVER");
+
+    sendCommand(0xC0);
+
+    printText("Score: ");
+
+    sendData(points + '0');
+
+    _delay_ms(2000);
+
+    PORTB &= ~(1 << PB0);
+
+    points = 0;
+    treePos = 15;
+    playerRow = 1;
+}
+
+int main()
+{
+    lcdStart();
+
+    DDRA = 0xFF;
+
+    DDRB |= (1 << PB0);
+
+    DDRD &= ~(1 << PD2);
+
+    PORTD |= (1 << PD2);
+
+    MCUCR |= (1 << ISC01);
+
+    GICR |= (1 << INT0);
+
+    sei();
+
+    customChar(0, dino);
+
+    customChar(1, cactus);
+
+    while (1)
+    {
+        if (started == 0)
+        {
+            sendCommand(0x01);
+
+            printText("Dino Game");
+
+            sendCommand(0xC0);
+
+            printText("Click to Play");
+
+            while (started == 0)
+            {
+                PORTA = numbers[0];
+            }
+        }
+
+        sendCommand(0x01);
+
+        PORTA = numbers[points % 10];
+
+        if (playerRow == 0)
+        {
+            sendCommand(0x82);
+
+            sendData(0);
+        }
+        else
+        {
+            sendCommand(0xC2);
+
+            sendData(0);
+        }
+
+        sendCommand(0xC0 + treePos);
+
+        sendData(1);
+
+        if (treePos == 2 && playerRow == 1)
+        {
+            loseScreen();
+
+            continue;
+        }
+
+        treePos--;
+
+        if (treePos < 0)
+        {
+            treePos = 15;
+
+            points++;
+        }
+
+        static int jumpDelay = 0;
+
+        if (playerRow == 0)
+        {
+            jumpDelay++;
+
+            if (jumpDelay > 2)
+            {
+                playerRow = 1;
+
+                jumpDelay = 0;
+            }
+        }
+
+        _delay_ms(100);
+    }
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+#ifndef F_CPU
+#define F_CPU 8000000UL
+#endif
+
+#include <avr/eeprom.h>
+#include <avr/io.h>
+#include <string.h>
+#include <util/delay.h>
+
+// =========================
+// Proteus / wiring settings
+// =========================
+#define PASSWORD "1234"
+
+// Keypad: left pins A-D -> PA0-PA3, bottom pins 1-4 -> PA4-PA7.
+// If the keypad prints wrong keys, only edit KEYMAP below.
+#define KEYPAD_ROW_MASK 0x0F
+#define KEYPAD_COL_MASK 0xF0
+
+// In the shown Proteus circuit the paddle pots look connected to PA0/PA1.
+// If your RV wipers are really on PA6/PA7, change these to 6 and 7.
+#define PADDLE1_ADC_CHANNEL 6
+#define PADDLE2_ADC_CHANNEL 7
+
+#define KP_COL1_PIN PA4
+#define KP_COL2_PIN PA5
+#define KP_COL3_PIN PB2
+#define KP_COL4_PIN PB3
+
+// Most Proteus dual red 7-segment multiplex displays are common cathode:
+// selected digit pin LOW, segment pin HIGH.
+// Set to 0 if your display part is common anode.
+#define SEVEN_SEG_COMMON_CATHODE 1
+
+// LCD on PORTB: RS=PB0, EN=PB1, D4-D7=PB4-PB7.
+#define LCD_PORT PORTB
+#define LCD_DDR DDRB
+#define LCD_RS PB0
+#define LCD_EN PB1
+
+// 7-seg segments on PC0-PC7: A,B,C,D,E,F,G,DP.
+#define SEG_PORT PORTC
+#define SEG_DDR DDRC
+
+// Digit enables and indicators on PORTD.
+#define DIGIT1 PD0
+#define DIGIT2 PD1
+#define LED_RED PD2
+#define LED_GREEN PD3
+#define BUZZER PD4
+
+static const char KEYMAP[4][4] = {
+    {'7', '8', '9', '/'},
+    {'4', '5', '6', '*'},
+    {'1', '2', '3', '-'},
+    {'C', '0', '=', '+'},
+};
+
+static const uint8_t SEGMENT_MAP[10] = {
+    0x3F, // 0
+    0x06, // 1
+    0x5B, // 2
+    0x4F, // 3
+    0x66, // 4
+    0x6D, // 5
+    0x7D, // 6
+    0x07, // 7
+    0x7F, // 8
+    0x6F  // 9
+};
+
+uint8_t EEMEM high_score_eeprom = 0;
+
+static void beep(uint16_t ms)
+{
+    PORTD |= (1 << BUZZER);
+    while (ms--) {
+        _delay_ms(1);
+    }
+    PORTD &= ~(1 << BUZZER);
+}
+
+static void lcd_pulse_enable()
+{
+    LCD_PORT |= (1 << LCD_EN);
+    _delay_us(1);
+    LCD_PORT &= ~(1 << LCD_EN);
+    _delay_us(100);
+}
+
+static void lcd_write_nibble(uint8_t nibble)
+{
+    // Clear only PB4-PB7 and set them to the nibble value
+    // This leaves PB0-PB3 (LCD RS/EN and Keypad) untouched
+    LCD_PORT = (LCD_PORT & 0x0F) | (nibble & 0xF0);
+    lcd_pulse_enable();
+}
+
+static void lcd_command(uint8_t cmd)
+{
+    LCD_PORT &= ~(1 << LCD_RS);
+    lcd_write_nibble(cmd);
+    lcd_write_nibble(cmd << 4);
+
+    if (cmd == 0x01 || cmd == 0x02) {
+        _delay_ms(2);
+    }
+}
+
+static void lcd_char(char data)
+{
+    LCD_PORT |= (1 << LCD_RS);
+    lcd_write_nibble((uint8_t)data);
+    lcd_write_nibble((uint8_t)data << 4);
+}
+
+static void lcd_print(const char *text)
+{
+    while (*text) {
+        lcd_char(*text++);
+    }
+}
+
+static void lcd_gotoxy(uint8_t x, uint8_t y)
+{
+    static const uint8_t row_addr[] = {0x80, 0xC0};
+    lcd_command(row_addr[y & 1] + x);
+}
+
+static void lcd_clear()
+{
+    lcd_command(0x01);
+}
+
+static void lcd_init()
+{
+    LCD_DDR = 0xFF;
+    LCD_PORT = 0x00;
+
+    _delay_ms(50);
+    LCD_PORT &= ~(1 << LCD_RS);
+
+    lcd_write_nibble(0x30);
+    _delay_ms(5);
+    lcd_write_nibble(0x30);
+    _delay_us(150);
+    lcd_write_nibble(0x30);
+    lcd_write_nibble(0x20);
+
+    lcd_command(0x28); // 4-bit, 2 lines
+    lcd_command(0x0C); // display on, cursor off
+    lcd_command(0x06); // increment cursor
+    lcd_clear();
+}
+
+static void keypad_prepare()
+{
+    DDRA = KEYPAD_ROW_MASK;                   // PA0-PA3 outputs
+    PORTA = KEYPAD_ROW_MASK | KEYPAD_COL_MASK; // rows high, column pullups on
+}
+
+static uint8_t keypad_any_pressed()
+{
+    for (uint8_t row = 0; row < 4; row++) {
+        PORTA = (KEYPAD_ROW_MASK | KEYPAD_COL_MASK) & ~(1 << row);
+        _delay_us(20);
+
+        if ((PINA & KEYPAD_COL_MASK) != KEYPAD_COL_MASK) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static char keypad_get_key()
+{
+    // Set Rows (PA0-PA3) as Output, Columns as Input with Pull-ups
+    DDRA |= 0x0F;   // PA0-PA3 Output
+    DDRA &= ~0x30;  // PA4-PA5 Input
+    DDRB &= ~0x0C;  // PB2-PB3 Input
+    PORTA |= 0x3F;  // Pull-ups on PA4-PA5, Rows High
+    PORTB |= 0x0C;  // Pull-ups on PB2-PB3
+
+    for (uint8_t row = 0; row < 4; row++) {
+        // Set current row LOW, others HIGH (using mask to not disturb ADC on PA6/7)
+        PORTA = (PORTA & 0xF0) | (0x0F & ~(1 << row));
+        _delay_us(30);
+
+        // Check Column 1 (PA4)
+        if (!(PINA & (1 << KP_COL1_PIN))) { _delay_ms(20); return KEYMAP[row][0]; }
+        // Check Column 2 (PA5)
+        if (!(PINA & (1 << KP_COL2_PIN))) { _delay_ms(20); return KEYMAP[row][1]; }
+        // Check Column 3 (PB2)
+        if (!(PINB & (1 << KP_COL3_PIN))) { _delay_ms(20); return KEYMAP[row][2]; }
+        // Check Column 4 (PB3)
+        if (!(PINB & (1 << KP_COL4_PIN))) { _delay_ms(20); return KEYMAP[row][3]; }
+    }
+    return 0;
+}
+
+static void adc_init()
+{
+    DDRA = 0x00;
+    PORTA = 0x00;
+
+    ADMUX = (1 << REFS0); // AVCC reference
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1); // ADC clock = F_CPU / 64
+}
+
+static uint16_t adc_read(uint8_t channel)
+{
+    ADMUX = (1 << REFS0) | (channel & 0x07);
+    _delay_us(10);
+    ADCSRA |= (1 << ADSC);
+    while (ADCSRA & (1 << ADSC)) {
+    }
+    return ADC;
+}
+
+static void seven_segment_all_off()
+{
+#if SEVEN_SEG_COMMON_CATHODE
+    PORTD |= (1 << DIGIT1) | (1 << DIGIT2);
+    SEG_PORT = 0x00;
+#else
+    PORTD &= ~((1 << DIGIT1) | (1 << DIGIT2));
+    SEG_PORT = 0xFF;
+#endif
+}
+
+static void seven_segment_show_digit(uint8_t digit_pin, uint8_t value)
+{
+    uint8_t pattern = SEGMENT_MAP[value % 10];
+
+    seven_segment_all_off();
+
+#if SEVEN_SEG_COMMON_CATHODE
+    SEG_PORT = pattern;
+    PORTD &= ~(1 << digit_pin);
+#else
+    SEG_PORT = (uint8_t)~pattern;
+    PORTD |= (1 << digit_pin);
+#endif
+
+    _delay_ms(3);
+    seven_segment_all_off();
+}
+
+static void display_score(uint8_t score1, uint8_t score2)
+{
+    seven_segment_show_digit(DIGIT1, score1);
+    seven_segment_show_digit(DIGIT2, score2);
+}
+
+static uint8_t ask_password()
+{
+    const char pass[] = PASSWORD;
+    char input[sizeof(pass)] = {0};
+    uint8_t pos = 0;
+
+    lcd_clear();
+    lcd_print("Enter Password");
+    lcd_gotoxy(0, 1);
+
+    while (1) {
+        char key = keypad_get_key();
+
+        if (!key) {
+            continue;
+        }
+
+        if (key == 'C') {
+            pos = 0;
+            memset(input, 0, sizeof(input));
+            lcd_gotoxy(0, 1);
+            lcd_print("                ");
+            lcd_gotoxy(0, 1);
+            beep(30);
+            continue;
+        }
+
+        if (key < '0' || key > '9') {
+            beep(80);
+            continue;
+        }
+
+        if (pos < strlen(pass)) {
+            input[pos++] = key;
+            lcd_char('*');
+            beep(30);
+        }
+
+        if (pos == strlen(pass)) {
+            input[pos] = '\0';
+
+            if (strcmp(input, pass) == 0) {
+                PORTD |= (1 << LED_GREEN);
+                PORTD &= ~(1 << LED_RED);
+                lcd_clear();
+                lcd_print("ACCESS GRANTED");
+                beep(120);
+                _delay_ms(1000);
+                return 1;
+            }
+
+            PORTD |= (1 << LED_RED);
+            PORTD &= ~(1 << LED_GREEN);
+            lcd_clear();
+            lcd_print("WRONG PASSWORD");
+            beep(250);
+            _delay_ms(900);
+
+            pos = 0;
+            memset(input, 0, sizeof(input));
+            lcd_clear();
+            lcd_print("Enter Password");
+            lcd_gotoxy(0, 1);
+        }
+    }
+}
+
+static void show_high_score(uint8_t high_score)
+{
+    lcd_clear();
+    lcd_print("HIGH SCORE: ");
+    lcd_char((high_score / 10) + '0');
+    lcd_char((high_score % 10) + '0');
+
+    for (uint16_t i = 0; i < 350; i++) {
+        display_score(0, 0);
+    }
+}
+
+static void draw_game(int8_t ball_x, uint8_t ball_y, uint8_t p1_pos, uint8_t p2_pos)
+{
+    lcd_clear();
+    lcd_gotoxy(0, p1_pos);
+    lcd_char('|');
+    lcd_gotoxy(15, p2_pos);
+    lcd_char('|');
+
+    if (ball_x >= 0 && ball_x <= 15) {
+        lcd_gotoxy((uint8_t)ball_x, ball_y);
+        lcd_char('O');
+    }
+}
+
+int main(void)
+{
+    SEG_DDR = 0xFF;
+    DDRD |= (1 << DIGIT1) | (1 << DIGIT2) | (1 << LED_RED) | (1 << LED_GREEN) | (1 << BUZZER);
+    PORTD &= ~((1 << LED_RED) | (1 << LED_GREEN) | (1 << BUZZER));
+    seven_segment_all_off();
+
+    lcd_init();
+    ask_password();
+
+    adc_init();
+
+    uint8_t high_score = eeprom_read_byte(&high_score_eeprom);
+    if (high_score > 99) {
+        high_score = 0;
+    }
+    show_high_score(high_score);
+
+    int8_t ball_x = 7;
+    uint8_t ball_y = 0;
+    int8_t dir_x = 1;
+    int8_t dir_y = 1;
+    uint8_t score1 = 0;
+    uint8_t score2 = 0;
+
+    while (1) {
+        uint8_t p1_pos = (adc_read(PADDLE1_ADC_CHANNEL) > 512) ? 1 : 0;
+        uint8_t p2_pos = (adc_read(PADDLE2_ADC_CHANNEL) > 512) ? 1 : 0;
+
+        ball_x += dir_x;
+        ball_y = (uint8_t)((int8_t)ball_y + dir_y);
+
+        if (ball_y > 1) {
+            ball_y = (dir_y > 0) ? 1 : 0;
+            dir_y = -dir_y;
+        }
+
+        if (ball_x == 1 && ball_y == p1_pos) {
+            dir_x = 1;
+        }
+
+        if (ball_x == 14 && ball_y == p2_pos) {
+            dir_x = -1;
+        }
+
+        if (ball_x < 0 || ball_x > 15) {
+            if (ball_x < 0) {
+                if (score2 < 99) {
+                    score2++;
+                }
+            } else {
+                if (score1 < 99) {
+                    score1++;
+                }
+            }
+
+            uint8_t best = (score1 > score2) ? score1 : score2;
+            if (best > high_score) {
+                high_score = best;
+                eeprom_update_byte(&high_score_eeprom, high_score);
+            }
+
+            beep(100);
+            ball_x = 7;
+            ball_y = 0;
+            dir_x = -dir_x;
+        }
+
+        draw_game(ball_x, ball_y, p1_pos, p2_pos);
+
+        for (uint8_t refresh = 0; refresh < 45; refresh++) {
+            display_score(score1, score2);
+        }
+    }
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef F_CPU
+#define F_CPU 8000000UL
+#endif
+
+#include <avr/io.h>
+#include <avr/eeprom.h>
+#include <util/delay.h>
+#include <string.h>
+
+#define PASS "1234"
+#define SPEED 7
+
+#define RS PB0
+#define EN PB1
+
+char keys[4][4] = 
+{
+    {'7','8','9','/'},
+    {'4','5','6','*'},
+    {'1','2','3','-'},
+    {'C','0','=','+'}
+};
+
+uint8_t nums[10] = 
+{
+    0x3F,0x06,0x5B,0x4F,0x66,
+    0x6D,0x7D,0x07,0x7F,0x6F
+};
+
+uint8_t EEMEM highScore = 0;
+
+void buzzer(int t)
+{
+    PORTD |= (1 << PD4);
+
+    for(int i = 0; i < t; i++)
+    {
+        _delay_ms(1);
+    }
+
+    PORTD &= ~(1 << PD4);
+}
+
+void enable()
+{
+    PORTB |= (1 << EN);
+    _delay_us(1);
+
+    PORTB &= ~(1 << EN);
+    _delay_us(50);
+}
+
+void send4(uint8_t x)
+{
+    PORTB = (PORTB & 0x0F) | (x & 0xF0);
+    enable();
+}
+
+void cmd(uint8_t x)
+{
+    PORTB &= ~(1 << RS);
+
+    send4(x);
+    send4(x << 4);
+
+    if(x < 4)
+    {
+        _delay_ms(2);
+    }
+}
+
+void lcdChar(char x)
+{
+    PORTB |= (1 << RS);
+
+    send4(x);
+    send4(x << 4);
+}
+
+void lcdString(char *s)
+{
+    while(*s)
+    {
+        lcdChar(*s);
+        s++;
+    }
+}
+
+void lcdXY(int x, int y)
+{
+    if(y == 0)
+    {
+        cmd(0x80 + x);
+    }
+    else
+    {
+        cmd(0xC0 + x);
+    }
+}
+
+void lcdInit()
+{
+    DDRB = 0xFF;
+
+    _delay_ms(50);
+
+    send4(0x30);
+    _delay_ms(5);
+
+    send4(0x30);
+    _delay_us(150);
+
+    send4(0x30);
+    send4(0x20);
+
+    cmd(0x28);
+    cmd(0x0C);
+    cmd(0x06);
+    cmd(0x01);
+}
+
+char keypad()
+{
+    DDRA = 0x0F;  // PA0-PA3 Outputs (Rows), PA4-PA7 Inputs (Columns)
+    PORTA = 0xF0; // Enable Pull-ups on Columns
+    
+    for(int row = 0; row < 4; row++) {
+        PORTA = ~(1 << row) | 0xF0; // Set current row LOW
+        _delay_us(10);
+        
+        for(int col = 0; col < 4; col++) {
+            if(!(PINA & (1 << (col + 4)))) { // Check columns PA4-PA7
+                _delay_ms(20); // Debounce
+                while(!(PINA & (1 << (col + 4)))); // Wait for release
+                return keys[row][col];
+            }
+        }
+    }
+    return 0;
+}
+
+void score(uint8_t a, uint8_t b)
+{
+    PORTD |= (1 << PD0) | (1 << PD1);
+
+    PORTC = 0x00;
+
+    _delay_us(100);
+
+    PORTC = nums[a % 10];
+
+    PORTD &= ~(1 << PD1);
+    PORTD |= (1 << PD0);
+
+    _delay_ms(2);
+
+    PORTD |= (1 << PD0) | (1 << PD1);
+
+    PORTC = 0x00;
+
+    _delay_us(100);
+
+    PORTC = nums[b % 10];
+
+    PORTD &= ~(1 << PD0);
+    PORTD |= (1 << PD1);
+
+    _delay_ms(2);
+}
+
+void password()
+{
+    char arr[5] = {0};
+
+    int i = 0;
+
+    cmd(0x01);
+
+    lcdString("Enter Password");
+
+    lcdXY(0,1);
+
+    while(1)
+    {
+        char k = keypad();
+
+        if(!k)
+        {
+            continue;
+        }
+
+        if(k == 'C')
+        {
+            i = 0;
+
+            lcdXY(0,1);
+
+            lcdString("    ");
+
+            lcdXY(0,1);
+        }
+
+        else if(k >= '0' && k <= '9' && i < 4)
+        {
+            arr[i] = k;
+            i++;
+
+            lcdChar('*');
+
+            buzzer(30);
+        }
+
+        if(i == 4)
+        {
+            arr[4] = '\0';
+
+            if(strcmp(arr, PASS) == 0)
+            {
+                PORTD |= (1 << PD3);
+
+                cmd(0x01);
+
+                lcdString("Correct");
+
+                buzzer(100);
+
+                _delay_ms(100);
+
+                break;
+            }
+
+            else
+            {
+                PORTD |= (1 << PD2);
+
+                cmd(0x01);
+
+                lcdString("Wrong");
+
+                buzzer(200);
+
+                _delay_ms(800);
+
+                PORTD &= ~(1 << PD2);
+
+                i = 0;
+
+                cmd(0x01);
+
+                lcdString("Enter Password");
+
+                lcdXY(0,1);
+            }
+        }
+    }
+}
+
+void game(int x, int y, int p1, int p2)
+{
+    cmd(0x01);
+
+    lcdXY(0,p1);
+    lcdChar('|');
+
+    lcdXY(15,p2);
+    lcdChar('|');
+
+    if(x >= 0 && x <= 15)
+    {
+        lcdXY(x,y);
+        lcdChar('O');
+    }
+}
+
+int main()
+{
+    DDRC = 0xFF;
+    DDRD = 0x1F; 
+    lcdInit();
+    password();
+
+    uint8_t best = eeprom_read_byte(&highScore);
+    if(best > 99) best = 0;
+    
+    cmd(0x01); lcdString("HIGH SCORE:");
+    lcdChar((best / 10) + '0'); lcdChar((best % 10) + '0');
+    for(int i = 0; i < 20; i++) score(0,0);
+
+    int p1=0, p2=0, bX=7, bY=0, dX=1, dY=1;
+
+    while(1) 
+    {
+        DDRA = 0x0F; PORTA = 0xF0;
+        PORTA &= ~(1 << 0); 
+        _delay_us(10);
+
+        int left = (!(PINA & (1 << 4))) ? 1 : 0;  
+        int right = (!(PINA & (1 << 7))) ? 1 : 0; 
+
+        bX += dX;
+        bY = (bX % 2);
+
+        if(bX == 1 && bY == left) dX = 1;
+        if(bX == 14 && bY == right) dX = -1;
+
+        if(bX < 0 || bX > 15) 
+        {
+            if(bX < 0)
+            {
+                p2++;
+            }
+            else 
+            {
+                p1++;
+            }
+
+            buzzer(100); bX = 7; dX = -dX;
+
+            if(p1 > best || p2 > best) 
+            {
+                best = (p1 > p2) ? p1 : p2;
+                eeprom_update_byte(&highScore, best);
+            }
+        }
+
+        game(bX, bY, left, right);
+        for(int i = 0; i < SPEED; i++)
+        {
+            score(p1, p2);
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#ifndef F_CPU
+#define F_CPU 8000000UL                      // MCU clock = 8MHz
+#endif
+
+#include <avr/io.h>                         // AVR registers
+#include <avr/eeprom.h>                     // EEPROM functions
+#include <util/delay.h>                     // delay functions
+#include <string.h>                         // strcmp()
+
+#define PASSWORD "1234"                     // Password for login
+#define GAME_DELAY 7                        // Game speed delay
+
+#define LCD_RS PA3                          // LCD RS pin
+#define LCD_EN PA2                          // LCD Enable pin
+
+// Keypad layout
+char keypadMap[4][4] =
+{
+    {'7','8','9','/'},
+    {'4','5','6','*'},
+    {'1','2','3','-'},
+    {'C','0','=','+'}
+};
+
+// Seven segment hex values
+uint8_t segData[10] =
+{
+    0x3F,0x06,0x5B,0x4F,0x66,
+    0x6D,0x7D,0x07,0x7F,0x6F
+};
+
+uint8_t EEMEM bestScore = 0;                // Store high score in EEPROM
+
+void beep(int time)
+{
+    PORTC |= (1<<PC6);                      // Turn buzzer ON
+
+    while(time--)                           // Repeat delay "time" times
+        _delay_ms(1);                       // Delay 1ms each loop
+
+    PORTC &= ~(1<<PC6);                     // Turn buzzer OFF
+}
+
+void pulse()
+{
+    PORTA |= (1<<LCD_EN);                   // EN = HIGH
+    _delay_us(1);                           // Small delay for LCD
+    PORTA &= ~(1<<LCD_EN);                  // EN = LOW
+}
+
+void lcdWrite4(uint8_t value)
+{
+    PORTB &= 0x0F;                          // Clear upper 4 bits only
+    PORTB |= (value & 0xF0);                // Put new upper 4 bits
+    pulse();                                // Tell LCD to read data
+}
+
+void lcdCmd(uint8_t value)
+{
+    PORTA &= ~(1<<LCD_RS);                  // RS = 0 -> command mode
+
+    lcdWrite4(value);                       // Send upper 4 bits
+    lcdWrite4(value << 4);                  // Send lower 4 bits
+
+    if(value < 4)                           // Clear/Home commands are slow
+        _delay_ms(2);                       // Extra delay for LCD
+}
+
+void lcdPut(char c)
+{
+    PORTA |= (1<<LCD_RS);                   // RS = 1 -> character mode
+
+    lcdWrite4(c);                           // Send upper 4 bits
+    lcdWrite4(c << 4);                      // Send lower 4 bits
+}
+
+void lcdPrint(char *text)
+{
+    while(*text)                            // Loop until '\0'
+        lcdPut(*text++);                    // Print char then move pointer
+}
+
+void lcdGoto(uint8_t col, uint8_t row)
+{
+    if(row == 0)                            // First row
+        lcdCmd(0x80 + col);                 // Move cursor
+    else                                    // Second row
+        lcdCmd(0xC0 + col);                 // Move cursor
+}
+
+void lcdBegin()
+{
+    DDRA |= (1<<LCD_RS) | (1<<LCD_EN);      // LCD control pins output
+    DDRB = 0xFF;                            // PORTB output for LCD data
+
+    _delay_ms(50);                          // LCD startup delay
+
+    lcdWrite4(0x30);                        // LCD init sequence
+    _delay_ms(5);
+
+    lcdWrite4(0x30);                        // LCD init sequence
+    _delay_us(150);
+
+    lcdWrite4(0x30);                        // LCD init sequence
+    lcdWrite4(0x20);                        // Switch to 4-bit mode
+
+    lcdCmd(0x28);                           // 4-bit, 2-line LCD
+    lcdCmd(0x0C);                           // Display ON, cursor OFF
+    lcdCmd(0x06);                           // Cursor move right
+    lcdCmd(0x01);                           // Clear screen
+}
+
+char getKey()
+{
+    DDRC |= 0x3C;                           // Keypad rows output
+    PORTC |= 0x3C;                          // Pull rows HIGH
+
+    DDRD &= ~((1<<PD3)|(1<<PD5)|(1<<PD6)|(1<<PD7)); // Columns input
+    PORTD |= (1<<PD3)|(1<<PD5)|(1<<PD6)|(1<<PD7);   // Enable pull-up
+
+    int rowPins[4] = {PC5,PC4,PC3,PC2};    // Row pins
+    int colPins[4] = {PD7,PD6,PD5,PD3};    // Column pins
+
+    for(int r=0;r<4;r++)                   // Scan each row
+    {
+        PORTC &= ~(1<<rowPins[r]);          // Make current row LOW
+
+        _delay_us(20);                      // Small settling delay
+
+        for(int c=0;c<4;c++)               // Check columns
+        {
+            if(!(PIND & (1<<colPins[c])))   // If button pressed
+            {
+                _delay_ms(30);              // Debounce delay
+
+                while(!(PIND & (1<<colPins[c]))); // Wait release
+
+                _delay_ms(30);              // Debounce delay
+
+                return keypadMap[r][c];     // Return pressed key
+            }
+        }
+
+        PORTC |= (1<<rowPins[r]);           // Restore row HIGH
+    }
+
+    return 0;                               // No key pressed
+}
+
+void showScore(uint8_t left,uint8_t right)
+{
+    PORTC &= ~((1<<PC6)|(1<<PC7));          // Disable both displays
+    PORTB = segData[left % 10];             // Show left score
+    PORTC |= (1<<PC7);                      // Enable left display
+
+    _delay_ms(5);                           // Multiplexing delay
+
+    PORTC &= ~((1<<PC6)|(1<<PC7));          // Disable both displays
+    PORTB = segData[right % 10];            // Show right score
+    PORTC |= (1<<PC6);                      // Enable right display
+
+    _delay_ms(5);                           // Multiplexing delay
+}
+
+void checkPassword()
+{
+    char input[5]={0};                      // Password buffer
+    int index=0;                            // Current input index
+
+    lcdCmd(0x01);                           // Clear LCD
+    lcdPrint("Enter Password");             // Print message
+    lcdGoto(0,1);                           // Move to second row
+
+    while(1)
+    {
+        char key=getKey();                  // Read keypad
+
+        if(!key)                            // No key
+            continue;
+
+        if(key=='C')                        // Clear input
+        {
+            index=0;
+
+            lcdCmd(0x01);                   // Clear LCD
+            lcdPrint("Enter Password");
+            lcdGoto(0,1);
+        }
+        else if(key>='0' && key<='9' && index<4) // Accept digits only
+        {
+            input[index++]=key;             // Save digit
+            lcdPut('*');                    // Hide password
+            beep(30);                       // Small beep
+        }
+
+        if(index==4)                        // Password complete
+        {
+            input[4]='\0';                  // End string
+
+            if(strcmp(input,PASSWORD)==0)   // Correct password
+            {
+                lcdCmd(0x01);
+                lcdPrint("Correct");
+
+                beep(100);
+
+                _delay_ms(500);
+
+                break;                      // Exit function
+            }
+
+            lcdCmd(0x01);                   // Wrong password
+            lcdPrint("Wrong");
+
+            beep(200);
+
+            _delay_ms(800);
+
+            index=0;                        // Reset input
+
+            lcdCmd(0x01);
+            lcdPrint("Enter Password");
+            lcdGoto(0,1);
+        }
+    }
+}
+
+void drawGame(int ballX,int ballY,int leftPad,int rightPad)
+{
+    lcdCmd(0x01);                           // Clear LCD
+
+    lcdGoto(0,leftPad);                     // Left paddle position
+    lcdPut('|');                            // Draw left paddle
+
+    lcdGoto(15,rightPad);                   // Right paddle position
+    lcdPut('|');                            // Draw right paddle
+
+    if(ballX>=0 && ballX<=15)               // Ball inside screen
+    {
+        lcdGoto(ballX,ballY);               // Ball position
+        lcdPut('O');                        // Draw ball
+    }
+}
+
+int main()
+{
+    DDRB=0xFF;                              // PORTB output
+    DDRC=0xFF;                              // PORTC output
+    DDRD=0x00;                              // PORTD input
+
+    lcdBegin();                             // Initialize LCD
+
+    checkPassword();                        // Ask for password
+
+    uint8_t high=eeprom_read_byte(&bestScore); // Read high score
+
+    if(high>99)                             // Safety check
+        high=0;
+
+    int leftScore=0;                        // Left player score
+    int rightScore=0;                       // Right player score
+
+    int ballX=7;                            // Ball X position
+    int ballY=0;                            // Ball Y position
+    int dir=1;                              // Ball direction
+
+    while(1)
+    {
+        int leftPlayer = !(PIND & (1<<PD7)); // Read left button
+        int rightPlayer = !(PIND & (1<<PD3));// Read right button
+
+        ballX += dir;                       // Move ball
+
+        ballY = ballX % 2;                  // Change row
+
+        if(ballX==1 && ballY==leftPlayer)   // Left hit
+            dir=1;
+
+        if(ballX==14 && ballY==rightPlayer) // Right hit
+            dir=-1;
+
+        if(ballX<0 || ballX>15)             // Ball out of screen
+        {
+            if(ballX<0)
+                rightScore++;               // Right player scores
+            else
+                leftScore++;                // Left player scores
+
+            beep(100);                      // Goal sound
+
+            ballX=7;                        // Reset ball
+            dir=-dir;                       // Reverse direction
+
+            if(leftScore>high || rightScore>high)
+            {
+                high = (leftScore>rightScore) ? leftScore : rightScore;
+
+                eeprom_update_byte(&bestScore,high); // Save high score
+            }
+        }
+
+        drawGame(ballX,ballY,leftPlayer,rightPlayer); // Draw frame
+
+        for(int i=0;i<GAME_DELAY;i++)       // Game speed control
+            showScore(leftScore,rightScore);// Refresh seven segment
+    }
+}

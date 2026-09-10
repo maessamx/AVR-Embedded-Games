@@ -1,0 +1,70 @@
+//
+// !!! WARNING !!! AUTO-GENERATED FILE!
+// PLEASE DO NOT MODIFY IT AND USE "platformio.ini":
+// https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags
+//
+{
+    "configurations": [
+        {
+            "name": "PlatformIO",
+            "includePath": [
+                "C:/Users/DELL/Desktop/tadreeb/final embedded/final/include",
+                "C:/Users/DELL/Desktop/tadreeb/final embedded/final/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/cores/MightyCore",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/variants/standard",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/AVR_examples/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/EEPROM/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Flash/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SD/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SPI/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SPI1/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Servo/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SoftwareSerial/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Timer/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Wire/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Wire1/src",
+                "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/progmem_far/src",
+                ""
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "path": [
+                    "C:/Users/DELL/Desktop/tadreeb/final embedded/final/include",
+                    "C:/Users/DELL/Desktop/tadreeb/final embedded/final/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/cores/MightyCore",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/variants/standard",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/AVR_examples/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/EEPROM/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Flash/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SD/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SPI/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SPI1/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Servo/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/SoftwareSerial/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Timer/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Wire/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/Wire1/src",
+                    "C:/Users/DELL/.platformio/packages/framework-arduino-avr-mightycore/libraries/progmem_far/src",
+                    ""
+                ]
+            },
+            "defines": [
+                "PLATFORMIO=60119",
+                "ARDUINO_AVR_ATmega32",
+                "F_CPU=8000000L",
+                "ARDUINO_ARCH_AVR",
+                "ARDUINO=10808",
+                "__AVR_ATmega32__",
+                ""
+            ],
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++17",
+            "compilerPath": "C:/Users/DELL/.platformio/packages/toolchain-atmelavr/bin/avr-gcc.exe",
+            "compilerArgs": [
+                "-mmcu=atmega32",
+                ""
+            ]
+        }
+    ],
+    "version": 4
+}

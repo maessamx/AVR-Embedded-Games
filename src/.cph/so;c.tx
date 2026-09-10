@@ -1,0 +1,375 @@
+#ifndef F_CPU
+#define F_CPU 8000000UL
+#endif
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/eeprom.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define LED_RED        PC0
+#define LED_GREEN      PC1
+#define BUZZER         PC5
+#define DIG_LEFT       PC6
+#define DIG_RIGHT      PC7
+#define LCD_RS         PA1
+#define LCD_EN         PA2
+
+static const uint8_t SEGM_CHARS[] = {
+    0x3F << 1, 
+    0x06 << 1, 
+    0x5B << 1, 
+    0x4F << 1, 
+    0x66 << 1, 
+    0x6D << 1, 
+    0x7D << 1, 
+    0x07 << 1, 
+    0x7F << 1, 
+    0x6F << 1  
+};
+
+static const char KEYPAD_MAP[4][4] = {
+    {'7', '8', '9', '/'},
+    {'4', '5', '6', '*'},
+    {'1', '2', '3', '-'},
+    {'C', '0', '=', '+'}
+};
+
+uint8_t EEMEM nvHighP1 = 0;
+uint8_t EEMEM nvHighP2 = 0;
+
+static unsigned int g_seed_counter = 0;
+
+void buzzer_beep(uint16_t duration_ms) {
+    PORTC |= (1 << BUZZER);
+    while (duration_ms--) {
+        _delay_ms(1);
+    }
+    PORTC &= ~(1 << BUZZER);
+}
+
+static inline void lcd_pulse_enable(void) {
+    PORTA |= (1 << LCD_EN);   _delay_us(10);
+    PORTA &= ~(1 << LCD_EN);  _delay_us(10);
+}
+
+void lcd_write_nibble(uint8_t nibble) {
+    uint8_t current_rs = PORTA & 0x02; 
+    PORTA = current_rs | ((nibble & 0xF0) >> 1);
+    lcd_pulse_enable();
+}
+
+void lcd_send_cmd(uint8_t cmd) {
+    PORTC &= ~((1 << DIG_LEFT) | (1 << DIG_RIGHT));
+    PORTA &= ~(1 << LCD_RS);
+    lcd_write_nibble(cmd); 
+    lcd_write_nibble(cmd << 4);
+    _delay_ms(2); 
+}
+
+void lcd_send_char(char c) {
+    PORTC &= ~((1 << DIG_LEFT) | (1 << DIG_RIGHT));
+    PORTA |= (1 << LCD_RS);
+    lcd_write_nibble(c); 
+    lcd_write_nibble(c << 4);
+    _delay_us(50);
+}
+
+void lcd_print_string(const char *str) {
+    while (*str) {
+        lcd_send_char(*str++);
+    }
+}
+
+void lcd_hardware_init(void) {
+    DDRA  = 0xFE; 
+    DDRC |= 0xE3; 
+    DDRB  = 0xFF;
+    
+    _delay_ms(50); 
+    
+    lcd_write_nibble(0x30); 
+    _delay_ms(5);
+    lcd_write_nibble(0x30); 
+    _delay_us(200);
+    lcd_write_nibble(0x30); 
+    _delay_us(200);
+    
+    lcd_write_nibble(0x20); 
+    _delay_ms(2);
+    
+    lcd_send_cmd(0x28); 
+    lcd_send_cmd(0x0C); 
+    lcd_send_cmd(0x01);
+    _delay_ms(2);
+}
+
+char keypad_scan(void) 
+{
+    DDRB |= 0xF0;  PORTB |= 0xF0;
+    DDRD &= ~0x3C; PORTD |= 0x3C;
+    
+    const uint8_t row_pins[] = {PB4, PB5, PB6, PB7};
+    const uint8_t col_pins[] = {PD2, PD3, PD4, PD5};
+    
+    for (uint8_t r = 0; r < 4; r++) {
+        PORTB &= ~(1 << row_pins[r]); 
+        _delay_us(5);
+        
+        for (uint8_t c = 0; c < 4; c++) {
+            if (!(PIND & (1 << col_pins[c]))) {
+                _delay_ms(20);
+                while (!(PIND & (1 << col_pins[c])));
+                return KEYPAD_MAP[r][c];
+            }
+        }
+        PORTB |= (1 << row_pins[r]);
+    }
+    return 0;
+}
+
+void display_refresh_score(uint8_t score1, uint8_t score2) {
+    uint8_t lcd_ctrl_bits = PORTA & 0x01; 
+
+    uint8_t left_pattern  = SEGM_CHARS[score1 % 10];
+    uint8_t right_pattern = SEGM_CHARS[score2 % 10];
+
+    PORTA = lcd_ctrl_bits | left_pattern; 
+    PORTC |= (1 << DIG_LEFT);               
+    _delay_ms(2);                           
+    PORTC &= ~(1 << DIG_LEFT);              
+    
+    PORTA = lcd_ctrl_bits | right_pattern; 
+    PORTC |= (1 << DIG_RIGHT);              
+    _delay_ms(2);                           
+    PORTC &= ~(1 << DIG_RIGHT);             
+    
+    PORTA &= 0x01;
+}
+
+void run_authentication_sequence(void) {
+    const char correct_password[] = "1234";
+    char input_buffer[5] = {0};
+    uint8_t input_index = 0;
+    
+    while (1) 
+    {
+        lcd_send_cmd(0x01); 
+        lcd_print_string("Enter Password");
+        lcd_send_cmd(0xC0); 
+        input_index = 0;
+        
+        while (input_index < 4) 
+        {
+            g_seed_counter++; 
+            char key = keypad_scan(); 
+            if (key >= '0' && key <= '9') 
+            { 
+                input_buffer[input_index++] = key; 
+                lcd_send_char('*'); 
+                buzzer_beep(20); 
+            } 
+        }
+        
+        if (strcmp(input_buffer, correct_password) == 0) {
+            srand(g_seed_counter);
+            PORTC |= (1 << LED_GREEN); 
+            PORTC &= ~(1 << LED_RED);
+            
+            lcd_send_cmd(0x01); 
+            lcd_print_string("Correct!"); 
+            _delay_ms(500);
+            
+            uint8_t high_score_p1 = eeprom_read_byte(&nvHighP1);
+            uint8_t high_score_p2 = eeprom_read_byte(&nvHighP2);
+            
+            lcd_send_cmd(0x01); 
+            lcd_print_string("Record: "); 
+            lcd_send_char((high_score_p1 / 10) + '0'); 
+            lcd_send_char((high_score_p1 % 10) + '0');
+            lcd_send_char(':');
+            lcd_send_char((high_score_p2 / 10) + '0'); 
+            lcd_send_char((high_score_p2 % 10) + '0');
+            
+            lcd_send_cmd(0xC0); 
+            lcd_print_string("Loading Game..."); 
+            _delay_ms(1500); 
+            return;
+        } else {
+            PORTC |= (1 << LED_RED); 
+            PORTC &= ~(1 << LED_GREEN);
+            lcd_send_cmd(0x01); 
+            lcd_print_string("Wrong Pass!"); 
+            buzzer_beep(200); 
+            _delay_ms(800);
+        }
+    }
+}
+
+int main(void) 
+{
+    lcd_hardware_init();
+    run_authentication_sequence();
+
+    int8_t ball_x = 7, ball_y = 0;
+    int8_t velocity_x = 1, velocity_y = 1;
+    uint8_t paddle_p1_y = 0, paddle_p2_y = 0;
+    uint8_t score_p1 = 0, score_p2 = 0;
+    
+    char render_buffer_l1[17];
+    char render_buffer_l2[17];
+
+    while (1) {
+        char action_key = keypad_scan();
+        
+        if (action_key == '7') paddle_p1_y = 0; 
+        if (action_key == '1') paddle_p1_y = 1;
+        if (action_key == '9') paddle_p2_y = 0; 
+        if (action_key == '3') paddle_p2_y = 1;
+
+        if (action_key == '5') {
+            buzzer_beep(600);
+            lcd_send_cmd(0x01); 
+            lcd_print_string("SESSION ENDED");
+            lcd_send_cmd(0xC0); 
+            lcd_print_string("Final: "); 
+            lcd_send_char((score_p1 / 10) + '0');  lcd_send_char((score_p1 % 10) + '0');
+            lcd_send_char(':'); 
+            lcd_send_char((score_p2 / 10) + '0');  lcd_send_char((score_p2 % 10) + '0');
+            
+            uint8_t stored_p1 = eeprom_read_byte(&nvHighP1);
+            uint8_t stored_p2 = eeprom_read_byte(&nvHighP2);
+            
+            if ((score_p1 > stored_p1) || (score_p1 == stored_p1 && score_p2 > stored_p2)) {
+                eeprom_update_byte(&nvHighP1, score_p1);
+                eeprom_update_byte(&nvHighP2, score_p2);
+                _delay_ms(1000); 
+                lcd_send_cmd(0x01); 
+                lcd_print_string(" NEW RECORD! ");
+            }
+            
+            for (uint8_t cycles = 0; cycles < 250; cycles++) {
+                display_refresh_score(score_p1, score_p2);
+            }
+            
+            score_p1 = 0; 
+            score_p2 = 0; 
+            ball_x = 7; 
+            
+            lcd_hardware_init(); 
+            lcd_print_string("Restarting..."); 
+            _delay_ms(1000);
+            continue;
+        }
+
+        ball_x += velocity_x; 
+        ball_y += velocity_y;
+        
+        if (ball_y < 0) { ball_y = 0; velocity_y = 1; } 
+        if (ball_y > 1) { ball_y = 1; velocity_y = -1; }
+
+        if (ball_x < 0 || ball_x > 15) {
+            if (ball_x < 0) score_p2++; else score_p1++;
+            buzzer_beep(300);
+            
+            lcd_send_cmd(0x01); 
+            lcd_print_string("   ROUND OVER!");
+            lcd_send_cmd(0xC0); 
+            lcd_print_string("Score: "); 
+            lcd_send_char(score_p1 + '0'); 
+            lcd_print_string(":");
+            lcd_send_char(score_p2 + '0');
+            
+            PORTA &= ~((1 << LCD_RS) | (1 << LCD_EN));
+            PORTC &= ~((1 << DIG_LEFT) | (1 << DIG_RIGHT));
+
+             // display score on LCD
+            for (uint8_t cycles = 0; cycles < 200; cycles++) {
+                display_refresh_score(score_p1, score_p2);
+            }
+            
+            lcd_hardware_init(); 
+            lcd_send_cmd(0x01);
+            _delay_ms(5);
+
+            if (score_p1 == 9 || score_p2 == 9) {
+                buzzer_beep(800); 
+                lcd_send_cmd(0x01);
+                
+                if (score_p1 == 9) {
+                    lcd_print_string("  PLAYER 1 WINS!");
+                } else {
+                    lcd_print_string("  PLAYER 2 WINS!");
+                }
+                
+                uint8_t stored_p1 = eeprom_read_byte(&nvHighP1);
+                uint8_t stored_p2 = eeprom_read_byte(&nvHighP2);
+                
+                if ((score_p1 > stored_p1) || (score_p1 == stored_p1 && score_p2 > stored_p2)) {
+                    eeprom_update_byte(&nvHighP1, score_p1);
+                    eeprom_update_byte(&nvHighP2, score_p2);
+                    stored_p1 = score_p1;
+                    stored_p2 = score_p2;
+                    lcd_send_cmd(0xC0);
+                    lcd_print_string(" NEW HIGH SCORE!");
+                    _delay_ms(1500);
+                    lcd_send_cmd(0x01);
+                }
+                
+                lcd_send_cmd(0xC0);
+                lcd_print_string("HiScore: ");
+                lcd_send_char((stored_p1 % 10) + '0'); 
+                lcd_send_char(':');
+                lcd_send_char((stored_p2 % 10) + '0');
+                
+                lcd_send_cmd(0x01);
+                lcd_print_string(" GAME OVER ");
+                
+                score_p1 = 0;
+                score_p2 = 0;
+                _delay_ms(3000); 
+                
+                lcd_hardware_init();
+                ball_x = 7;
+                ball_y = 0;
+                continue;
+            }
+            
+            ball_x = 7; 
+            ball_y = 0; 
+            velocity_x = (rand() % 2 == 0) ? 1 : -1;
+            velocity_y = (rand() % 2 == 0) ? 1 : -1;
+            
+            continue; 
+        }
+
+        if (ball_x == 0 && ball_y == paddle_p1_y)  { velocity_x = 1;  buzzer_beep(5); }
+        if (ball_x == 15 && ball_y == paddle_p2_y) { velocity_x = -1; buzzer_beep(5); }
+
+        memset(render_buffer_l1, ' ', 16); 
+        memset(render_buffer_l2, ' ', 16);
+        render_buffer_l1[16] = render_buffer_l2[16] = '\0';
+        
+        if (paddle_p1_y == 0) render_buffer_l1[0]  = '|'; else render_buffer_l2[0]  = '|';
+        if (paddle_p2_y == 0) render_buffer_l1[15] = '|'; else render_buffer_l2[15] = '|';
+        
+        if (ball_x >= 0 && ball_x < 16) {
+            if (ball_y == 0) render_buffer_l1[ball_x] = 'O'; else render_buffer_l2[ball_x] = 'O';
+        }
+
+        // go to row 0 col 0
+        lcd_send_cmd(0x80);
+        lcd_print_string(render_buffer_l1);
+
+        // go to row 1 col 0
+        lcd_send_cmd(0xC0);
+        lcd_print_string(render_buffer_l2);
+        
+        // display score on 7seg and control speed of ball
+        for (uint8_t cycles = 0; cycles < 50; cycles++) {
+            display_refresh_score(score_p1, score_p2);
+        }
+    }
+}
